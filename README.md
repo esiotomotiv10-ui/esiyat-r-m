@@ -26,12 +26,14 @@ app/
   core/              # Yapılandırma (config) ve kill switch
   market_data/       # Piyasa sınıfları + mum modelleri, CSV yükleyici, depo
   indicators/        # SMA, EMA, RSI, MACD, ATR
-  strategies/        # Strateji arayüzü + örnek SMA kesişim stratejisi
+  strategies/        # Strateji arayüzü + teknik analiz stratejileri
+  signals/           # SignalEngine: stratejileri ağırlıklı birleştirme
   risk/              # Risk limitleri ve pozisyon boyutlandırma
   portfolio/         # Paper portföy modeli (nakit, pozisyon, düşüş takibi)
   execution/         # Güvenlik + risk + broker + portföyü bağlayan motor
   brokers/           # Broker arayüzü + paper broker (stub)
   backtest/          # Paper-only backtest motoru (strateji + sonuç metrikleri)
+  paper_trading/     # Paper-only orchestrator (SignalEngine -> ExecutionEngine)
 tests/               # pytest test paketi
 ```
 
@@ -91,6 +93,82 @@ series = load_bars_from_csv("aapl.csv", "AAPL", allowed_root="data", timeframe=T
 result = BacktestEngine(SMACrossoverStrategy()).run(series)
 print(result.total_return, result.max_drawdown, result.num_trades)
 ```
+
+## 🧭 Stratejiler ve sinyal motoru
+
+### Sinyal modeli
+
+`app.strategies.base.Signal` immutable bir teknik analiz sinyalidir:
+
+- `type` — `BUY` / `SELL` / `HOLD`
+- `strength` — 0 ile 1 arası güven; NaN/inf veya aralık dışı değerler reddedilir
+- `reason` — açıklama, `strategy` — üreten stratejinin adı, `timestamp`, `symbol`
+
+`Strategy` arayüzünün sözleşmesi: yalnızca geçmiş ve mevcut kapanışları alır
+(gelecek barlara erişim yok → **look-ahead bias yok**), `min_bars` ile gereken
+asgari bar sayısını bildirir, yetersiz veride `HOLD` döndürür ve aynı girdi için
+**deterministik** aynı sonucu üretir.
+
+### Stratejiler
+
+| Strateji | Sınıf | Sinyal mantığı |
+|----------|-------|----------------|
+| SMA kesişim | `SMACrossoverStrategy` | Kısa SMA uzun SMA'yı keser |
+| EMA kesişim | `EMACrossoverStrategy` | Kısa EMA uzun EMA'yı keser |
+| RSI | `RSIStrategy` | Aşırı satım → BUY, aşırı alım → SELL |
+| MACD kesişim | `MACDCrossoverStrategy` | Histogram işaret değiştirir |
+| Trend + RSI | `TrendRSIStrategy` | Trend filtresi + RSI zamanlaması |
+
+Her strateji parametrelerini doğrular, NaN/inf girdiyi güvenli şekilde `HOLD`
+ile karşılar ve deterministiktir.
+
+### SignalEngine
+
+`app.signals.SignalEngine` bir veya birden fazla stratejiyi çalıştırıp
+sonuçlarını **ağırlıklı** birleştirir. Ağırlıklar pozitif, sonlu ve toplamı
+sıfırdan büyük olmalıdır. Çelişkili sinyallerde ya da yapılandırılabilir
+`min_strength` eşiğinin altında güvenli şekilde `HOLD` döner. Kill switch
+etkinse daima `HOLD` döner. **Hiçbir emir göndermez** — yalnızca sinyal üretir.
+
+```python
+from app.signals import SignalEngine
+from app.strategies import EMACrossoverStrategy, RSIStrategy
+
+engine = SignalEngine(
+    [EMACrossoverStrategy(12, 26), RSIStrategy(14)],
+    weights=[2.0, 1.0],
+    min_strength=0.3,
+)
+combined = engine.evaluate("AAPL", closes)
+print(combined.signal.type, combined.signal.strength, combined.net_score)
+```
+
+## 📝 Paper trading orchestrator (paper-only)
+
+`app.paper_trading.PaperTradingOrchestrator` bir `BarSeries` üzerinde bar-by-bar
+çalışır: her barda `SignalEngine` sinyalini üretir ve kararı **bir sonraki barın
+açılış (open) fiyatında** `ExecutionEngine` üzerinden gerçekleştirir. Böylece
+look-ahead bias oluşmaz.
+
+Güvenceler: yalnızca yerleşik `PaperBroker` kullanılır; global kill switch ve
+mevcut `RiskManager` uygulanır; short selling kapalıdır; yetersiz nakit ve fazla
+satış reddedilir. Komisyon ve slippage yapılandırılabilir.
+
+```python
+from app.paper_trading import PaperTradingOrchestrator, OrchestratorConfig
+from app.signals import SignalEngine
+from app.strategies import SMACrossoverStrategy
+
+engine = SignalEngine([SMACrossoverStrategy(20, 50)])
+orch = PaperTradingOrchestrator(
+    engine, OrchestratorConfig(initial_cash=100_000, commission_rate=0.001, slippage_rate=0.0005)
+)
+result = orch.run(series)  # series: app.market_data.BarSeries
+print(result.final_equity, result.num_accepted, result.num_rejected)
+```
+
+`PaperTradingResult`: üretilen sinyaller, kabul/ret edilen emirler ve red
+nedenleri, final nakit/equity, pozisyonlar ve equity curve.
 
 ## ⚖️ Risk limitleri
 
