@@ -24,13 +24,14 @@ app/
   main.py            # FastAPI giriş noktası + başlangıç güvenlik doğrulaması
   api/               # HTTP yönlendiricileri (/health, /safety, kill switch)
   core/              # Yapılandırma (config) ve kill switch
-  market_data/       # BIST, ABD hisseleri ve altın piyasa sınıfları (stub)
+  market_data/       # Piyasa sınıfları + mum modelleri, CSV yükleyici, depo
   indicators/        # SMA, EMA, RSI, MACD, ATR
   strategies/        # Strateji arayüzü + örnek SMA kesişim stratejisi
   risk/              # Risk limitleri ve pozisyon boyutlandırma
   portfolio/         # Paper portföy modeli (nakit, pozisyon, düşüş takibi)
   execution/         # Güvenlik + risk + broker + portföyü bağlayan motor
   brokers/           # Broker arayüzü + paper broker (stub)
+  backtest/          # Paper-only backtest motoru (strateji + sonuç metrikleri)
 tests/               # pytest test paketi
 ```
 
@@ -53,6 +54,43 @@ tests/               # pytest test paketi
 - `GoldMarket` — Altın/emtia (`XAUUSD`, `XAUTRY`)
 
 Canlı veri erişimi bilinçli olarak `NotImplementedError` yükseltir.
+
+### Mum verisi modelleri ve yükleme
+
+- `BarSeries` — tek bir sembole ait, zamana göre sıralı ve doğrulanmış OHLCV
+  mum serisi (OHLC tutarlılığı, pozitif fiyat, artan zaman damgası kontrolü).
+  `closes`, `highs`, `lows`, `opens`, `volumes` özellikleriyle `numpy` dizileri
+  sunar.
+- `Timeframe` — zaman dilimleri (`1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w`).
+- `load_bars_from_csv(path, symbol, allowed_root=..., timeframe=...)` —
+  `timestamp,open,high,low,close,volume` sütunlu CSV'den `BarSeries` yükler.
+  Dosya yalnızca `allowed_root` altında okunur; path traversal, symlink kaçışı,
+  duplicate timestamp ve sırasız CSV güvenli şekilde reddedilir.
+- `InMemoryBarRepository` — serileri sembol + zaman dilimine göre saklar;
+  `get_range(...)` ile tarih aralığı sorgusu yapılır.
+
+## 🔁 Backtest
+
+`app.backtest` altında **paper-only** geçmişe dönük sınama motoru:
+
+- `BacktestEngine(strategy, config=...)` — bir stratejiyi `BarSeries` üzerinde
+  mum-mum çalıştırır. İşlemler yerleşik `PaperBroker` + `ExecutionEngine`
+  üzerinden yürütülür; risk limitleri ve paper-only güvenceler backtest'te de
+  geçerlidir (gerçek emir gönderimi yok).
+- `BacktestConfig` — `initial_cash`, `stop_loss_pct` (pozisyon boyutlandırma),
+  `warmup`.
+- `BacktestResult` — özkaynak eğrisi, işlemler ve özet metrikler:
+  `total_return`, `max_drawdown`, `num_trades`.
+
+```python
+from app.backtest import BacktestEngine
+from app.market_data import load_bars_from_csv, Timeframe
+from app.strategies import SMACrossoverStrategy
+
+series = load_bars_from_csv("aapl.csv", "AAPL", allowed_root="data", timeframe=Timeframe.D1)
+result = BacktestEngine(SMACrossoverStrategy()).run(series)
+print(result.total_return, result.max_drawdown, result.num_trades)
+```
 
 ## ⚖️ Risk limitleri
 
