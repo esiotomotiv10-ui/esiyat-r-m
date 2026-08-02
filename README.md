@@ -62,9 +62,10 @@ Canlı veri erişimi bilinçli olarak `NotImplementedError` yükseltir.
   `closes`, `highs`, `lows`, `opens`, `volumes` özellikleriyle `numpy` dizileri
   sunar.
 - `Timeframe` — zaman dilimleri (`1m`, `5m`, `15m`, `1h`, `4h`, `1d`, `1w`).
-- `load_bars_from_csv(path, symbol, timeframe=...)` — `timestamp,open,high,low,`
-  `close,volume` sütunlu CSV'den `BarSeries` yükler; eksik sütun/geçersiz satır
-  için `ValueError`, olmayan dosya için `FileNotFoundError` yükseltir.
+- `load_bars_from_csv(path, symbol, allowed_root=..., timeframe=...)` —
+  `timestamp,open,high,low,close,volume` sütunlu CSV'den `BarSeries` yükler.
+  Dosya yalnızca `allowed_root` altında okunur; path traversal, symlink kaçışı,
+  duplicate timestamp ve sırasız CSV güvenli şekilde reddedilir.
 - `InMemoryBarRepository` — serileri sembol + zaman dilimine göre saklar;
   `get_range(...)` ile tarih aralığı sorgusu yapılır.
 
@@ -86,7 +87,7 @@ from app.backtest import BacktestEngine
 from app.market_data import load_bars_from_csv, Timeframe
 from app.strategies import SMACrossoverStrategy
 
-series = load_bars_from_csv("data/aapl.csv", "AAPL", timeframe=Timeframe.D1)
+series = load_bars_from_csv("aapl.csv", "AAPL", allowed_root="data", timeframe=Timeframe.D1)
 result = BacktestEngine(SMACrossoverStrategy()).run(series)
 print(result.total_return, result.max_drawdown, result.num_trades)
 ```

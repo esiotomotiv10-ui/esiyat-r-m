@@ -49,20 +49,30 @@ def load_bars_from_csv(
     path: str | Path,
     symbol: str,
     *,
+    allowed_root: str | Path,
     timeframe: Timeframe = Timeframe.D1,
 ) -> BarSeries:
     """Bir CSV dosyasından doğrulanmış ``BarSeries`` yükler.
 
     Args:
-        path: CSV dosya yolu.
+        path: CSV dosya yolu. Göreli ise ``allowed_root`` altında çözülür.
         symbol: Satırlarda ``symbol`` sütunu yoksa kullanılacak sembol.
+        allowed_root: Okumaya izin verilen yerel kök dizin.
         timeframe: Serinin zaman dilimi.
 
     Raises:
         FileNotFoundError: Dosya bulunamazsa.
         ValueError: Başlık/sütun eksikse veya satırlar geçersizse.
     """
-    file_path = Path(path)
+    root_path = Path(allowed_root).resolve(strict=True)
+    raw_path = Path(path)
+    file_path = (
+        (root_path / raw_path).resolve(strict=True)
+        if not raw_path.is_absolute()
+        else raw_path.resolve(strict=True)
+    )
+    if not file_path.is_relative_to(root_path):
+        raise ValueError("CSV yolu izin verilen kökün dışında.")
     if not file_path.is_file():
         raise FileNotFoundError(f"CSV dosyası bulunamadı: {file_path}")
 
@@ -79,6 +89,13 @@ def load_bars_from_csv(
     if not bars:
         raise ValueError("CSV veri satırı içermiyor.")
 
-    # BarSeries kronolojik sıra bekler; girdi sırasını garanti etmek için sıralarız.
-    bars.sort(key=lambda b: b.timestamp)
+    previous = None
+    seen: set[datetime] = set()
+    for bar in bars:
+        if bar.timestamp in seen:
+            raise ValueError("CSV duplicate timestamp içeriyor.")
+        seen.add(bar.timestamp)
+        if previous is not None and bar.timestamp <= previous:
+            raise ValueError("CSV kronolojik olarak artan sırada olmalı.")
+        previous = bar.timestamp
     return BarSeries.from_bars(symbol=symbol, timeframe=timeframe, bars=bars)

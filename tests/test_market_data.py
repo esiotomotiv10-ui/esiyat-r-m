@@ -88,35 +88,87 @@ def test_load_bars_from_csv(tmp_path: Path) -> None:
     _write_csv(
         csv_path,
         [
-            "2024-01-03,101,103,100,102,1500",
             "2024-01-01,100,101,99,100,1000",
             "2024-01-02,100,102,99,101,1200",
+            "2024-01-03,101,103,100,102,1500",
         ],
     )
-    series = load_bars_from_csv(csv_path, "AAPL", timeframe=Timeframe.D1)
+    series = load_bars_from_csv(csv_path, "AAPL", allowed_root=tmp_path, timeframe=Timeframe.D1)
     assert len(series) == 3
-    # CSV sırasız verilse de kronolojik sıralanır.
     assert [b.timestamp.day for b in series] == [1, 2, 3]
     assert series.symbol == "AAPL"
 
 
-def test_load_bars_missing_file() -> None:
+def test_load_bars_missing_file(tmp_path: Path) -> None:
     with pytest.raises(FileNotFoundError):
-        load_bars_from_csv("/nonexistent/path.csv", "AAPL")
+        load_bars_from_csv("missing.csv", "AAPL", allowed_root=tmp_path)
 
 
 def test_load_bars_missing_columns(tmp_path: Path) -> None:
     csv_path = tmp_path / "bad.csv"
     _write_csv(csv_path, ["2024-01-01,1,2"], header="timestamp,open,high")
     with pytest.raises(ValueError, match="eksik sütunlar"):
-        load_bars_from_csv(csv_path, "AAPL")
+        load_bars_from_csv(csv_path, "AAPL", allowed_root=tmp_path)
 
 
 def test_load_bars_invalid_row(tmp_path: Path) -> None:
     csv_path = tmp_path / "bad_row.csv"
     _write_csv(csv_path, ["2024-01-01,abc,101,99,100,1000"])
     with pytest.raises(ValueError, match="Geçersiz CSV satırı"):
-        load_bars_from_csv(csv_path, "AAPL")
+        load_bars_from_csv(csv_path, "AAPL", allowed_root=tmp_path)
+
+
+def test_load_bars_rejects_path_traversal(tmp_path: Path) -> None:
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    allowed.mkdir()
+    outside.mkdir()
+    csv_path = outside / "aapl.csv"
+    _write_csv(csv_path, ["2024-01-01,100,101,99,100,1000"])
+    with pytest.raises(ValueError, match="izin verilen"):
+        load_bars_from_csv("../outside/aapl.csv", "AAPL", allowed_root=allowed)
+
+
+def test_load_bars_rejects_symlink_escape(tmp_path: Path) -> None:
+    allowed = tmp_path / "allowed"
+    outside = tmp_path / "outside"
+    allowed.mkdir()
+    outside.mkdir()
+    csv_path = outside / "aapl.csv"
+    link_path = allowed / "linked.csv"
+    _write_csv(csv_path, ["2024-01-01,100,101,99,100,1000"])
+    try:
+        link_path.symlink_to(csv_path)
+    except (OSError, NotImplementedError):
+        pytest.skip("Symlink creation is not available on this platform")
+    with pytest.raises(ValueError, match="izin verilen"):
+        load_bars_from_csv("linked.csv", "AAPL", allowed_root=allowed)
+
+
+def test_load_bars_rejects_duplicate_timestamp(tmp_path: Path) -> None:
+    csv_path = tmp_path / "duplicate.csv"
+    _write_csv(
+        csv_path,
+        [
+            "2024-01-01,100,101,99,100,1000",
+            "2024-01-01,100,102,99,101,1200",
+        ],
+    )
+    with pytest.raises(ValueError, match="duplicate timestamp"):
+        load_bars_from_csv(csv_path, "AAPL", allowed_root=tmp_path)
+
+
+def test_load_bars_rejects_unsorted_csv(tmp_path: Path) -> None:
+    csv_path = tmp_path / "unsorted.csv"
+    _write_csv(
+        csv_path,
+        [
+            "2024-01-02,100,102,99,101,1200",
+            "2024-01-01,100,101,99,100,1000",
+        ],
+    )
+    with pytest.raises(ValueError, match="kronolojik"):
+        load_bars_from_csv(csv_path, "AAPL", allowed_root=tmp_path)
 
 
 # --- Repository ---
@@ -129,6 +181,15 @@ def test_repository_save_and_get() -> None:
     assert repo.get("AAPL", Timeframe.D1) is series
     assert repo.get("MSFT", Timeframe.D1) is None
     assert repo.symbols() == ["AAPL"]
+
+
+def test_repository_results_are_chronological_and_immutable() -> None:
+    repo = InMemoryBarRepository()
+    repo.save(_series("AAPL", n=3))
+    result = repo.get("AAPL", Timeframe.D1)
+    assert result is not None
+    assert isinstance(result.bars, tuple)
+    assert [bar.timestamp for bar in result] == sorted(bar.timestamp for bar in result)
 
 
 def test_repository_get_range() -> None:
