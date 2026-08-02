@@ -17,18 +17,19 @@ class KillSwitch:
     def __init__(self, *, initial: bool = False) -> None:
         self._lock = threading.Lock()
         self._engaged = initial
+        self._reason: str | None = None
 
     def engage(self, reason: str | None = None) -> None:
         """Kill switch'i etkinleştirir (durdurur)."""
         with self._lock:
             self._engaged = True
-        self._reason = reason
+            self._reason = reason
 
     def reset(self) -> None:
         """Süreç içi bayrağı sıfırlar. Ortam değişkeni hâlâ baskındır."""
         with self._lock:
             self._engaged = False
-        self._reason = None
+            self._reason = None
 
     @property
     def is_engaged(self) -> bool:
@@ -36,6 +37,12 @@ class KillSwitch:
         with self._lock:
             local = self._engaged
         return local or get_settings().kill_switch
+
+    @property
+    def reason(self) -> str | None:
+        """Süreç içi kill switch gerekçesi."""
+        with self._lock:
+            return self._reason
 
 
 # Uygulama genelinde paylaşılan tekil örnek.

@@ -10,6 +10,7 @@ from __future__ import annotations
 from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from enum import StrEnum
+from math import isfinite
 
 
 class OrderSide(StrEnum):
@@ -37,10 +38,16 @@ class Order:
     limit_price: float | None = None
 
     def __post_init__(self) -> None:
-        if self.quantity <= 0:
+        if not self.symbol.strip():
+            raise ValueError("Emir sembolü boş olamaz.")
+        if not isfinite(self.quantity) or self.quantity <= 0:
             raise ValueError("Emir miktarı pozitif olmalı.")
         if self.order_type is OrderType.LIMIT and self.limit_price is None:
             raise ValueError("Limit emir için limit_price gerekli.")
+        if self.limit_price is not None and (
+            not isfinite(self.limit_price) or self.limit_price <= 0
+        ):
+            raise ValueError("Limit fiyat pozitif ve sonlu olmalı.")
 
 
 @dataclass(frozen=True)

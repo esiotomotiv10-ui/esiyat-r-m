@@ -9,10 +9,11 @@ def test_default_is_paper_and_live_disabled() -> None:
     settings = Settings()
     assert settings.trading_mode is TradingMode.PAPER
     assert settings.live_trading_disabled is True
+    assert settings.enable_kill_switch_endpoint is False
 
 
 def test_non_paper_mode_forced_to_paper() -> None:
-    settings = Settings(trading_mode="live")  # type: ignore[arg-type]
+    settings = Settings(trading_mode="live")
     assert settings.trading_mode is TradingMode.PAPER
 
 

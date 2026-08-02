@@ -13,6 +13,7 @@ from app.core.config import get_settings
 from app.core.kill_switch import kill_switch
 
 router = APIRouter()
+management_router = APIRouter()
 
 
 class HealthResponse(BaseModel):
@@ -78,7 +79,7 @@ def safety_status() -> SafetyStatus:
     )
 
 
-@router.post("/safety/kill-switch", response_model=KillSwitchResponse, tags=["safety"])
+@management_router.post("/safety/kill-switch", response_model=KillSwitchResponse, tags=["safety"])
 def set_kill_switch(request: KillSwitchRequest) -> KillSwitchResponse:
     """Kill switch'i etkinleştirir veya süreç içi bayrağı sıfırlar."""
     if request.engaged:

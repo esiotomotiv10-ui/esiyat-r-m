@@ -5,6 +5,7 @@ from __future__ import annotations
 import math
 
 import numpy as np
+import pytest
 
 from app.indicators import atr, ema, macd, rsi, sma
 
@@ -37,6 +38,11 @@ def test_rsi_all_gains_is_100() -> None:
     values = list(range(1, 20))  # sürekli artan
     result = rsi(values, period=14)
     assert result[14] == 100.0
+
+
+def test_rsi_flat_series_is_neutral() -> None:
+    result = rsi([100.0] * 20, period=14)
+    assert result[14] == 50.0
 
 
 def test_rsi_range() -> None:
@@ -84,3 +90,8 @@ def test_atr_positive() -> None:
     result = atr(high, low, close, period=14)
     valid = result[~np.isnan(result)]
     assert np.all(valid > 0)
+
+
+def test_indicators_reject_non_finite_input() -> None:
+    with pytest.raises(ValueError):
+        sma([1.0, math.nan, 3.0], period=2)

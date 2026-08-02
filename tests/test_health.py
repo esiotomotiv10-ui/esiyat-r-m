@@ -2,13 +2,16 @@
 
 from __future__ import annotations
 
+import pytest
 from fastapi.testclient import TestClient
 
+from app.core.config import get_settings
 from app.core.kill_switch import kill_switch
 from app.main import create_app
 
 
 def _client() -> TestClient:
+    get_settings.cache_clear()
     return TestClient(create_app())
 
 
@@ -35,7 +38,19 @@ def test_safety_status_enforces_paper_and_live_disabled() -> None:
     assert body["max_portfolio_drawdown"] == 0.10
 
 
-def test_kill_switch_toggle() -> None:
+def test_kill_switch_endpoint_disabled_by_default() -> None:
+    kill_switch.reset()
+    with _client() as client:
+        resp = client.post("/safety/kill-switch", json={"engaged": True, "reason": "test"})
+    assert resp.status_code == 404
+    assert kill_switch.is_engaged is False
+
+
+def test_kill_switch_toggle_when_explicitly_enabled_in_development(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("ENABLE_KILL_SWITCH_ENDPOINT", "true")
+    monkeypatch.setenv("ENVIRONMENT", "development")
     kill_switch.reset()
     with _client() as client:
         engage = client.post("/safety/kill-switch", json={"engaged": True, "reason": "test"})
@@ -46,3 +61,4 @@ def test_kill_switch_toggle() -> None:
         assert reset.status_code == 200
         assert reset.json()["kill_switch_engaged"] is False
     kill_switch.reset()
+    get_settings.cache_clear()

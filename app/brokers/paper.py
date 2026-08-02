@@ -7,6 +7,7 @@ sayar. Kill switch etkinse hiçbir emri kabul etmez.
 from __future__ import annotations
 
 import uuid
+from math import isfinite
 
 from app.brokers.base import BrokerClient, Order, OrderResult, OrderType
 from app.core.kill_switch import KillSwitch, kill_switch
@@ -30,7 +31,7 @@ class PaperBroker(BrokerClient):
                 is_paper=True,
                 message="Kill switch etkin — emir reddedildi.",
             )
-        if reference_price <= 0:
+        if not isfinite(reference_price) or reference_price <= 0:
             return OrderResult(
                 accepted=False,
                 order_id=None,
@@ -44,6 +45,15 @@ class PaperBroker(BrokerClient):
         fill_price = reference_price
         if order.order_type is OrderType.LIMIT and order.limit_price is not None:
             fill_price = order.limit_price
+        if not isfinite(fill_price) or fill_price <= 0:
+            return OrderResult(
+                accepted=False,
+                order_id=None,
+                filled_quantity=0.0,
+                avg_fill_price=0.0,
+                is_paper=True,
+                message="Geçersiz gerçekleşme fiyatı.",
+            )
 
         return OrderResult(
             accepted=True,

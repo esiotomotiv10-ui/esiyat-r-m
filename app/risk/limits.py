@@ -11,6 +11,7 @@ Kill switch etkinse hiçbir işlem onaylanmaz.
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
 from app.core.config import Settings, get_settings
 from app.core.kill_switch import KillSwitch, kill_switch
@@ -58,6 +59,10 @@ class RiskManager:
         self.limits = limits or RiskLimits.from_settings()
         self._kill_switch = switch or kill_switch
 
+    @staticmethod
+    def _finite(value: float) -> bool:
+        return isfinite(value)
+
     def position_size(
         self,
         *,
@@ -70,10 +75,12 @@ class RiskManager:
         Riske edilen tutar = equity * max_risk_per_trade. Adet, bu tutarın
         birim başına riske (giriş - stop farkı) bölünmesiyle bulunur.
         """
-        if equity <= 0:
+        if not self._finite(equity) or equity <= 0:
             raise ValueError("equity pozitif olmalı.")
-        if entry_price <= 0:
+        if not self._finite(entry_price) or entry_price <= 0:
             raise ValueError("entry_price pozitif olmalı.")
+        if not self._finite(stop_price) or stop_price <= 0:
+            raise ValueError("stop_price pozitif ve sonlu olmalı.")
         risk_per_unit = abs(entry_price - stop_price)
         if risk_per_unit <= 0:
             raise ValueError("stop_price, entry_price'tan farklı olmalı.")
@@ -95,8 +102,29 @@ class RiskManager:
         if self._kill_switch.is_engaged:
             return RiskDecision(False, "Kill switch etkin — işlem reddedildi.")
 
+        if not all(
+            self._finite(value)
+            for value in (
+                equity,
+                entry_price,
+                stop_price,
+                quantity,
+                current_asset_value,
+                daily_pnl,
+                drawdown,
+            )
+        ):
+            return RiskDecision(False, "Risk girdileri sonlu sayılar olmalı.")
         if equity <= 0:
             return RiskDecision(False, "Özkaynak (equity) pozitif olmalı.")
+        if entry_price <= 0 or stop_price <= 0:
+            return RiskDecision(False, "Fiyatlar pozitif olmalı.")
+        if quantity <= 0:
+            return RiskDecision(False, "Miktar pozitif olmalı.")
+        if current_asset_value < 0:
+            return RiskDecision(False, "Mevcut varlık değeri negatif olamaz.")
+        if drawdown < 0:
+            return RiskDecision(False, "Drawdown negatif olamaz.")
 
         # Günlük azami zarar kontrolü (daily_pnl negatif ise zarar).
         if daily_pnl < 0 and abs(daily_pnl) >= self.limits.max_daily_loss * equity:
@@ -118,6 +146,8 @@ class RiskManager:
         if risk_per_unit <= 0:
             return RiskDecision(False, "Geçersiz stop seviyesi.")
         trade_risk = risk_per_unit * quantity
+        if not isfinite(trade_risk):
+            return RiskDecision(False, "İşlem riski aşırı büyük.")
         max_trade_risk = self.limits.max_risk_per_trade * equity
         if trade_risk > max_trade_risk:
             allowed = self.position_size(
@@ -131,6 +161,8 @@ class RiskManager:
 
         # Tek varlık azami ağırlığı kontrolü.
         prospective_value = current_asset_value + entry_price * quantity
+        if not isfinite(prospective_value):
+            return RiskDecision(False, "Pozisyon değeri aşırı büyük.")
         max_asset_value = self.limits.max_asset_weight * equity
         if prospective_value > max_asset_value:
             headroom = max(max_asset_value - current_asset_value, 0.0)

@@ -19,7 +19,8 @@ USER appuser
 # Paper trading zorunlu; canlı emir kapalı.
 ENV TRADING_MODE=paper \
     LIVE_TRADING_DISABLED=true \
-    KILL_SWITCH=false
+    KILL_SWITCH=false \
+    ENABLE_KILL_SWITCH_ENDPOINT=false
 
 EXPOSE 8000
 

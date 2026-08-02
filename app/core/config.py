@@ -39,6 +39,7 @@ class Settings(BaseSettings):
     trading_mode: TradingMode = TradingMode.PAPER
     live_trading_disabled: bool = True
     kill_switch: bool = False
+    enable_kill_switch_endpoint: bool = False
 
     # --- Risk parametreleri (oran, 0-1 arası) ---
     max_risk_per_trade: float = Field(default=0.01, gt=0, le=1)

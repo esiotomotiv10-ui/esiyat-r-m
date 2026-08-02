@@ -7,6 +7,7 @@ yalnızca bellekte tutulur; kalıcı depolama ve gerçek emir yoktur.
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+from math import isfinite
 
 
 @dataclass
@@ -19,6 +20,8 @@ class Position:
 
     def market_value(self, price: float) -> float:
         """Verilen fiyata göre pozisyonun piyasa değeri."""
+        if not isfinite(price) or price <= 0:
+            raise ValueError("Fiyat pozitif ve sonlu olmalı.")
         return self.quantity * price
 
 
@@ -32,8 +35,10 @@ class Portfolio:
     peak_equity: float = field(default=0.0)
 
     def __post_init__(self) -> None:
-        if self.cash < 0:
+        if not isfinite(self.cash) or self.cash < 0:
             raise ValueError("Başlangıç nakiti negatif olamaz.")
+        if not isfinite(self.peak_equity):
+            raise ValueError("Tepe özkaynak sonlu olmalı.")
         if self.peak_equity <= 0:
             self.peak_equity = self.cash
 
@@ -63,12 +68,14 @@ class Portfolio:
         ``quantity`` pozitif ise alış, negatif ise satış. Nakit ve ortalama
         maliyet buna göre güncellenir.
         """
-        if price <= 0:
-            raise ValueError("Fiyat pozitif olmalı.")
-        if quantity == 0:
-            raise ValueError("Miktar sıfır olamaz.")
+        if not isfinite(price) or price <= 0:
+            raise ValueError("Fiyat pozitif ve sonlu olmalı.")
+        if not isfinite(quantity) or quantity == 0:
+            raise ValueError("Miktar sıfır olmayan sonlu bir sayı olmalı.")
 
         cost = quantity * price
+        if not isfinite(cost):
+            raise ValueError("İşlem tutarı aşırı büyük.")
         if quantity > 0 and cost > self.cash:
             raise ValueError("Yetersiz nakit.")
 
@@ -77,7 +84,11 @@ class Portfolio:
         if quantity > 0:
             # Alış: ağırlıklı ortalama maliyet güncellenir.
             total_qty = pos.quantity + quantity
+            if not isfinite(total_qty) or total_qty <= 0:
+                raise ValueError("Pozisyon miktarı geçersiz.")
             pos.avg_price = (pos.avg_price * pos.quantity + price * quantity) / total_qty
+            if not isfinite(pos.avg_price):
+                raise ValueError("Ortalama fiyat geçersiz.")
             pos.quantity = total_qty
         else:
             sell_qty = -quantity

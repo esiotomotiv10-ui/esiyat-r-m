@@ -20,6 +20,8 @@ def _as_array(values: Sequence[float] | FloatArray) -> FloatArray:
     arr = np.asarray(values, dtype=np.float64)
     if arr.ndim != 1:
         raise ValueError("Girdi tek boyutlu bir dizi olmalı.")
+    if not np.all(np.isfinite(arr)):
+        raise ValueError("Girdi sonlu sayılardan oluşmalı.")
     return arr
 
 
@@ -71,6 +73,8 @@ def rsi(values: Sequence[float] | FloatArray, period: int = 14) -> FloatArray:
     avg_loss = losses[:period].mean()
 
     def _rsi_value(ag: float, al: float) -> float:
+        if ag == 0 and al == 0:
+            return 50.0
         if al == 0:
             return 100.0
         rs = ag / al
