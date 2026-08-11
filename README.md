@@ -130,6 +130,17 @@ curl http://127.0.0.1:8000/health
 curl http://127.0.0.1:8000/safety
 ```
 
+Paper-only backtest API'si:
+
+```bash
+curl -X POST http://127.0.0.1:8000/backtests \
+  -H "Content-Type: application/json" \
+  -d '{"symbol":"AAPL","timeframe":"1d","bars":[],"strategy":{"name":"sma_crossover"}}'
+```
+
+`POST /backtests` yalnızca istekte verilen OHLCV mumlarıyla çalışır; gerçek
+broker, canlı veri kaynağı veya emir gönderimi parametresi kabul etmez.
+
 ## 🧪 Geliştirme
 
 ```bash

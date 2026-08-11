@@ -13,7 +13,7 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI
 
 from app import __version__
-from app.api import management_router, router
+from app.api import backtest_router, management_router, router
 from app.core.config import TradingMode, get_settings
 
 
@@ -43,6 +43,7 @@ def create_app() -> FastAPI:
         lifespan=lifespan,
     )
     app.include_router(router)
+    app.include_router(backtest_router)
     if settings.enable_kill_switch_endpoint and settings.environment == "development":
         app.include_router(management_router)
     return app
