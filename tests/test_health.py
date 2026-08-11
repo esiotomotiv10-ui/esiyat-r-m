@@ -127,7 +127,7 @@ def test_backtest_endpoint_fills_signal_on_next_bar_open() -> None:
     assert resp.status_code == 200
     trades = resp.json()["trades"]
     assert trades
-    assert trades[0]["timestamp"] == "2024-01-08T00:00:00"
+    assert trades[0]["timestamp"] == "2024-01-08T00:00:00Z"
     assert trades[0]["price"] == 21
 
 

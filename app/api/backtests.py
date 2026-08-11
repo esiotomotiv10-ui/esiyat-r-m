@@ -7,12 +7,13 @@ source, or execution mode.
 
 from __future__ import annotations
 
-from datetime import datetime
+import re
+from datetime import UTC, datetime
 from math import isfinite
 from typing import Literal
 
 from fastapi import APIRouter, HTTPException
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from app.backtest import BacktestConfig, BacktestEngine
 from app.brokers.base import OrderSide
@@ -21,6 +22,19 @@ from app.strategies import SMACrossoverStrategy
 
 router = APIRouter(prefix="/backtests", tags=["backtests"])
 
+# Tek istekte kabul edilen azami mum sayısı. Strateji hesaplaması her mumda
+# o ana kadarki tüm pencere üzerinde yeniden çalıştığından maliyet mum
+# sayısının karesiyle büyür; bu üst sınır olmadan çok büyük istekler
+# sunucuyu uzun süre kilitleyebilir (DoS).
+MAX_BARS = 2_000
+
+# short_period/long_period için mantıklı bir üst sınır. MAX_BARS'ı aşan bir
+# dönem zaten hiçbir sinyal üretemez; üst sınır anlamsız/aşırı büyük
+# değerlerin sessizce kabul edilmesini engeller.
+MAX_PERIOD = MAX_BARS
+
+_SYMBOL_PATTERN = re.compile(r"^[A-Z0-9][A-Z0-9._-]{0,31}$")
+
 
 def _ensure_finite(value: float, field_name: str) -> float:
     if not isfinite(value):
@@ -28,8 +42,23 @@ def _ensure_finite(value: float, field_name: str) -> float:
     return value
 
 
+def _to_utc(value: datetime) -> datetime:
+    """Timestamp'i UTC'ye normalize eder.
+
+    Timezone bilgisi olmayan (naive) girdiler UTC olarak kabul edilir.
+    Bu normalizasyon olmadan aynı istekte hem naive hem timezone-aware
+    timestamp'ler karışırsa domain katmanındaki sıralama karşılaştırması
+    (``bar.timestamp <= prev_ts``) yakalanmamış bir ``TypeError`` fırlatır.
+    """
+    if value.tzinfo is None:
+        return value.replace(tzinfo=UTC)
+    return value.astimezone(UTC)
+
+
 class BarInput(BaseModel):
     """Single OHLCV bar supplied by an API caller."""
+
+    model_config = ConfigDict(extra="forbid")
 
     timestamp: datetime
     open: float = Field(..., gt=0, allow_inf_nan=False)
@@ -37,6 +66,11 @@ class BarInput(BaseModel):
     low: float = Field(..., gt=0, allow_inf_nan=False)
     close: float = Field(..., gt=0, allow_inf_nan=False)
     volume: float = Field(..., ge=0, allow_inf_nan=False)
+
+    @field_validator("timestamp")
+    @classmethod
+    def _normalize_timestamp(cls, value: datetime) -> datetime:
+        return _to_utc(value)
 
     @field_validator("open", "high", "low", "close", "volume")
     @classmethod
@@ -59,9 +93,11 @@ class BarInput(BaseModel):
 class SMACrossoverStrategyInput(BaseModel):
     """Supported strategy configuration."""
 
+    model_config = ConfigDict(extra="forbid")
+
     name: Literal["sma_crossover"] = "sma_crossover"
-    short_period: int = Field(default=20, gt=0)
-    long_period: int = Field(default=50, gt=0)
+    short_period: int = Field(default=20, gt=0, le=MAX_PERIOD)
+    long_period: int = Field(default=50, gt=0, le=MAX_PERIOD)
 
     @model_validator(mode="after")
     def _validate_periods(self) -> SMACrossoverStrategyInput:
@@ -80,9 +116,11 @@ class SMACrossoverStrategyInput(BaseModel):
 class BacktestConfigInput(BaseModel):
     """Backtest configuration accepted by the API."""
 
+    model_config = ConfigDict(extra="forbid")
+
     initial_cash: float = Field(default=100_000.0, gt=0, allow_inf_nan=False)
     stop_loss_pct: float = Field(default=0.15, gt=0, lt=1, allow_inf_nan=False)
-    warmup: int = Field(default=0, ge=0)
+    warmup: int = Field(default=0, ge=0, le=MAX_BARS)
     commission_rate: float = Field(default=0.0, ge=0, allow_inf_nan=False)
     slippage_rate: float = Field(default=0.0, ge=0, allow_inf_nan=False)
 
@@ -111,9 +149,11 @@ class BacktestConfigInput(BaseModel):
 class BacktestRequest(BaseModel):
     """Paper-only backtest request."""
 
+    model_config = ConfigDict(extra="forbid")
+
     symbol: str = Field(..., min_length=1, max_length=32)
     timeframe: Timeframe = Timeframe.D1
-    bars: list[BarInput] = Field(..., min_length=1)
+    bars: list[BarInput] = Field(..., min_length=1, max_length=MAX_BARS)
     strategy: SMACrossoverStrategyInput
     config: BacktestConfigInput = Field(default_factory=BacktestConfigInput)
 
@@ -121,8 +161,10 @@ class BacktestRequest(BaseModel):
     @classmethod
     def _normalize_symbol(cls, value: str) -> str:
         symbol = value.strip().upper()
-        if not symbol:
-            raise ValueError("symbol boş olamaz.")
+        if not symbol or not _SYMBOL_PATTERN.match(symbol):
+            raise ValueError(
+                "symbol yalnızca harf, rakam, '.', '_' veya '-' içermeli ve harf/rakamla başlamalı."
+            )
         return symbol
 
     def to_series(self) -> BarSeries:
@@ -178,7 +220,7 @@ def run_backtest(request: BacktestRequest) -> BacktestResponse:
             request.strategy.to_strategy(),
             request.config.to_config(),
         ).run(request.to_series())
-    except ValueError as exc:
+    except (ValueError, TypeError) as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
 
     return BacktestResponse(
